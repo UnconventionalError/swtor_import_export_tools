@@ -11,7 +11,7 @@ def update_jba_scale(self, context):
 
 
 class Prefs(bpy.types.AddonPreferences):
-    bl_idname = "io_scene_gr2"
+    bl_idname = "swtor_io_tools"
 
     # Preferences properties --------------------
 

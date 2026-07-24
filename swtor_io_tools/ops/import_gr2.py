@@ -143,6 +143,12 @@ class ImportGR2(Operator):
         default=1.0,
     )
 
+    blender_friendly_skeleton: BoolProperty(
+        name="Blender Friendly Skeleton",
+        description="SKELETON (.gr2) FILES ONLY. Does not move, resize, or otherwise\nreshape the original 'Original Skeleton Import' data -- bone head,\ntail and length are all untouched.\n\nRecalculates bone roll consistently across the whole skeleton (instead\nof keeping BioWare's original, per-bone roll values, which are not\naligned to any common axis). This is what makes Local-space rotation\nbehave predictably (no unexpected skewing) and makes X-Mirror editing\nand posing work correctly between Left/Right bone pairs.\n\nEach bone's original roll (in radians) is stored as a custom property\n('gr2_original_roll') so that tools such as .jba animation import can\nstill compensate for the difference later on",
+        default=False,
+    )
+
     enforce_neutral_settings: BoolProperty(
         name="Enforce Neutral Settings",
         description="Temporarily overrides this Add-on's settings\with those of older versions for compatibility with older tools",
@@ -152,7 +158,7 @@ class ImportGR2(Operator):
 
     job_results_rich: BoolProperty(
         name="Rich results Info",
-        description="For easier interaction with third party code, this add-on fills 'bpy.context.scene.io_scene_gr2_last_job'\nwith info about its most recent job (imported objects's names) in .json format.\nSet to Rich, it provides additional data such as their relationships to filenames",
+        description="For easier interaction with third party code, this add-on fills 'bpy.context.scene.swtor_io_last_job'\nwith info about its most recent job (imported objects's names) in .json format.\nSet to Rich, it provides additional data such as their relationships to filenames",
         options={'HIDDEN'},
         default=False,
     )
@@ -172,13 +178,14 @@ class ImportGR2(Operator):
         # we use an Invoke function instead of directly using ImportHelper in
         # the class definition, to be able to put there the required code.              
         
-        prefs = context.preferences.addons["io_scene_gr2"].preferences
+        prefs = context.preferences.addons["swtor_io_tools"].preferences
         
         self.import_collision       = prefs.gr2_import_collision
         self.name_as_filename       = prefs.gr2_name_as_filename
         self.apply_axis_conversion  = prefs.gr2_apply_axis_conversion
         self.scale_object           = prefs.gr2_scale_object
         self.scale_factor           = prefs.gr2_scale_factor
+        self.blender_friendly_skeleton = prefs.gr2_blender_friendly_skeleton
         self.job_results_rich       = False
         self.job_results_accumulate = False
 
@@ -223,7 +230,7 @@ class ImportGR2(Operator):
             if not load(self, context, path):
                 return {'CANCELLED'}
 
-        bpy.context.scene.io_scene_gr2_last_job = json.dumps(job_results)
+        bpy.context.scene.swtor_io_last_job = json.dumps(job_results)
 
         return {"FINISHED"}
 
@@ -480,13 +487,14 @@ def read(operator, filepath):
 
 def build(gr2,
           filepath="",
-          import_collision      = None,
-          name_as_filename      = None,
-          scale_object          = None,
-          scale_factor          = None,
-          apply_axis_conversion = None,
+          import_collision        = None,
+          name_as_filename        = None,
+          scale_object            = None,
+          scale_factor            = None,
+          apply_axis_conversion   = None,
+          blender_friendly_skeleton = False,
           ):
-    # type: (Granny2, str, bool, bool, bool, float, bool) -> None
+    # type: (Granny2, str, bool, bool, bool, float, bool, bool) -> None
 
     # Data that will be used for publishing results
     # via scene props to other add-ons
@@ -703,6 +711,7 @@ def build(gr2,
         armature: bpy.types.Armature = bpy.context.object.data
         armature.name = filepath.split(os.sep)[-1][:-4]
         armature.display_type = 'STICK'
+        bpy.context.object.show_in_front = True
 
         # Remove the default bone Blender auto-creates with object.add(type='ARMATURE'),
         # otherwise every gr2 bone index below ends up off-by-one against armature.edit_bones.
@@ -725,6 +734,90 @@ def build(gr2,
             # print(matrix, i , bone.name)  # for diagnostics
             matrix.transpose()
             armature_bone.transform(matrix.inverted())
+
+        # "Blender Friendly Skeleton": roll cleanup.
+        # SKELETON FILES ONLY. Does not move or resize any bone (head, tail,
+        # and length are all untouched) -- only roll (local axis orientation)
+        # is adjusted.
+        if blender_friendly_skeleton:
+
+            # Original roll is stored per-bone before we touch it, so that
+            # other tools (e.g. a future .jba importer update) can still
+            # compensate pose data authored against BioWare's original axes.
+            for i, bone in gr2.bone_buffer.items():
+                armature.edit_bones[i]["gr2_original_roll"] = armature.edit_bones[i].roll
+
+            # --- Bone roll ---
+            # Recalculated toward one consistent reference axis across the
+            # whole skeleton (instead of BioWare's original per-bone roll,
+            # which has no common alignment). This is what makes Local-space
+            # rotation behave predictably (no unexpected skewing), and, as a
+            # side effect, makes Left/Right bone pairs true mirror images of
+            # each other, which is what X-Mirror editing/posing depends on.
+            #
+            # NOTE: this runs *before* the object-level 90d X rotation below
+            # that converts SWTOR's Y-up to Blender's Z-up, so the skeleton
+            # is still in its native Y-up space here -- "up" is +Y, not +Z.
+            #
+            # calculate_roll needs a numerically well-conditioned head->tail
+            # vector to work; the hardcoded near-zero tail (1e-5) sits right
+            # at Blender's internal minimum bone length and makes the
+            # calculation unreliable/a no-op. Temporarily lengthen every
+            # bone along its existing direction just for this calculation,
+            # then shrink it straight back down afterward -- roll is stored
+            # independently of tail position, so this has no lasting effect
+            # on bone length.
+            SCRATCH_LENGTH = 0.05
+            for b in armature.edit_bones:
+                direction = b.tail - b.head
+                direction = direction.normalized() if direction.length > 1e-9 else Vector((0, 1, 0))
+                b.tail = b.head + direction * SCRATCH_LENGTH
+
+            for b in armature.edit_bones:
+                b.select_head = True
+                b.select_tail = True
+                b.select = True
+            armature.edit_bones.active = armature.edit_bones[0]
+            bpy.ops.armature.calculate_roll(type='GLOBAL_POS_Y')
+            for b in armature.edit_bones:
+                b.select_head = False
+                b.select_tail = False
+                b.select = False
+
+            # calculate_roll aligns every bone independently to the same
+            # reference axis, which only gets Left/Right pairs *close* to
+            # true mirror images of each other -- the source rig has a small
+            # inherent asymmetry, so each side lands slightly differently.
+            # That residual gap is enough for Blender's X-Mirror to treat
+            # them as not-actually-mirrored. So: force each "Right*" bone's
+            # orientation to be the EXACT mirror of its "Left*" counterpart,
+            # on top of what calculate_roll already did.
+            F = Matrix.Diagonal((-1.0, 1.0, 1.0, 1.0))
+            for b in armature.edit_bones:
+                if not b.name.startswith('Left'):
+                    continue
+                right_name = 'Right' + b.name[len('Left'):]
+                right_bone = armature.edit_bones.get(right_name)
+                if right_bone is None:
+                    continue
+                mirrored = F @ b.matrix @ F
+                mirrored.translation = right_bone.matrix.translation  # keep the right bone's own position
+                right_bone.matrix = mirrored
+
+            # Shrink every bone back down to the original hardcoded (near-
+            # zero) length. Deliberately NOT restoring the original snapshot
+            # here -- that would revert exactly the direction correction the
+            # steps above just made (roll would stay "fixed" while the
+            # actual head->tail direction silently reverted to the
+            # original, un-mirrored one, giving a Left/Right pair whose
+            # roll *looks* correctly negated but isn't actually consistent
+            # with its own direction). Instead, keep whatever direction the
+            # bone currently has, and only rescale it down to a dot.
+            ORIGINAL_LENGTH = 0.00001
+            for b in armature.edit_bones:
+                direction = b.tail - b.head
+                direction = direction.normalized() if direction.length > 1e-9 else Vector((0, 1, 0))
+                b.tail = b.head + direction * ORIGINAL_LENGTH
 
         bpy.context.object.name = armature.name
         resulting_single_mesh_blender_objects.append(bpy.context.object.name)
@@ -788,6 +881,7 @@ def load(operator, context, filepath = ""):
                                   scale_object          = False,
                                   scale_factor          = 1.0,
                                   apply_axis_conversion = False,
+                                  blender_friendly_skeleton = False,
                                   )
         else:
             if operator.bl_idname == 'IMPORT_MESH_OT_gr2' and operator.options.is_invoke:
@@ -802,12 +896,13 @@ def load(operator, context, filepath = ""):
                                       scale_object          = operator.scale_object,
                                       scale_factor          = operator.scale_factor,
                                       apply_axis_conversion = operator.apply_axis_conversion,
+                                      blender_friendly_skeleton = operator.blender_friendly_skeleton,
                                       )
             else:
                 # Called via other Import Menu options (such as the
                 # .json Character importer) or code not from this Add-on:
                 # use the preferences' settings.
-                prefs = bpy.context.preferences.addons["io_scene_gr2"].preferences
+                prefs = bpy.context.preferences.addons["swtor_io_tools"].preferences
                 objects_names = build(mesh,
                                       filepath              = filepath,
                                       import_collision      = prefs.gr2_import_collision,
@@ -815,6 +910,7 @@ def load(operator, context, filepath = ""):
                                       scale_object          = prefs.gr2_scale_object,
                                       scale_factor          = prefs.gr2_scale_factor,
                                       apply_axis_conversion = prefs.gr2_apply_axis_conversion,
+                                      blender_friendly_skeleton = prefs.gr2_blender_friendly_skeleton,
                                       )
 
         

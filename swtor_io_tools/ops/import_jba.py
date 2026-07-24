@@ -101,7 +101,7 @@ class ImportJBA(Operator):
         # we use an Invoke function instead of directly using ImportHelper in
         # the class definition, to be able to put there the required code.
         
-        prefs = context.preferences.addons["io_scene_gr2"].preferences
+        prefs = context.preferences.addons["swtor_io_tools"].preferences
         
         self.ignore_facial_bones = prefs.jba_ignore_facial_bones
         self.delete_180          = prefs.jba_delete_180
@@ -369,7 +369,7 @@ def build(operator, context, filepath, jba):
         if operator.scale_animation:
             scale = 1000 * (1 / operator.scale_factor)
         else:
-            prefs = context.preferences.addons["io_scene_gr2"].preferences
+            prefs = context.preferences.addons["swtor_io_tools"].preferences
             if prefs.gr2_scale_object:
                 scale = 1000 * (1 / prefs.gr2_scale_factor)
             else:

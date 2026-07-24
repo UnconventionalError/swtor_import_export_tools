@@ -153,8 +153,8 @@ def register():
 
     
     from bpy.props import StringProperty
-    bpy.types.Scene.io_scene_gr2_last_job = StringProperty(
-        name="io_scene_gr2 Add-on's Last Activity",
+    bpy.types.Scene.swtor_io_last_job = StringProperty(
+        name="SWTOR IO Add-on's Last Activity",
         description=".json-format info about the results of the use of this add-on\n (e.g., objects imported) that external operators can use",
         default='',
         )
@@ -215,7 +215,7 @@ def unregister():
     for cls in classes:
         unregister_class(cls)
         
-    del bpy.types.Scene.io_scene_gr2_last_job
+    del bpy.types.Scene.swtor_io_last_job
 
 
 if __name__ == '__main__':

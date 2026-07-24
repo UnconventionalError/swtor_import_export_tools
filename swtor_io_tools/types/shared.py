@@ -14,7 +14,7 @@ job_results = {'job_origin'        : "",
 # The dict is also converted to .json and placed
 # in a custom scene stringProperty:
 #
-# bpy.context.scene.io_scene_gr2_job_results
+# bpy.context.scene.swtor_io_last_job
 #
 # before exiting this add-on's jobs so that other
 # Add-ons can read it. It's the simplest way to

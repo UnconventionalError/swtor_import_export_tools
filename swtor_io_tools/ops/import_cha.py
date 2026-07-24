@@ -1077,7 +1077,7 @@ def load(operator, context, filepath=""):
     Returns True on success, False on failure (mirrors import_gr2.py's
     own load() return convention).
     """
-    prefs = bpy.context.preferences.addons["io_scene_gr2"].preferences
+    prefs = bpy.context.preferences.addons["swtor_io_tools"].preferences
     resources_root = prefs.swtor_resources_dir
 
     if not resources_root or not Path(resources_root).is_dir():
@@ -1234,7 +1234,7 @@ class ImportCHA(bpy.types.Operator):
     )
 
     def invoke(self, context, event):
-        prefs = bpy.context.preferences.addons["io_scene_gr2"].preferences
+        prefs = bpy.context.preferences.addons["swtor_io_tools"].preferences
         self.import_skeleton = prefs.gr2_import_skeleton_default
         self.bind_to_skeleton = prefs.gr2_bind_to_skeleton_default
         self.append_character_name_to_collections = prefs.gr2_append_character_name_to_collections_default
